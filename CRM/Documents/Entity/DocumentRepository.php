@@ -62,6 +62,14 @@ class CRM_Documents_Entity_DocumentRepository {
         )
     );
     while($docsDao->fetch()) {
+      $isCaseDoc = CRM_Core_DAO::singleValueQuery("SELECT id FROM civicrm_document_case WHERE document_id = {$docsDao->id}");
+      $casePermissions = array(
+        array('administer CiviCase', 'access all cases and activities'),
+      );
+      if (!empty($isCaseDoc) && !CRM_Core_Permission::check($casePermissions)) {
+        continue;
+      }
+
       $doc = new CRM_Documents_Entity_Document();
       $this->loadDocByDao($doc, $docsDao);
       $documents[] = $doc;
@@ -344,13 +352,13 @@ class CRM_Documents_Entity_DocumentRepository {
     $dao->id = $document->getId();
     $dao->subject = $document->getSubject();
     if ($document->getDateAdded()) {
-      $dao->date_added = $document->getDateAdded()->format('Ymd');
+      $dao->date_added = $document->getDateAdded()->format('Ymdhis');
     }
     if ($document->getAddedBy()) {
       $dao->added_by = $document->getAddedBy();
     }
     if ($document->getDateUpdated()) {
-      $dao->date_updated = $document->getDateUpdated()->format('Ymd');
+      $dao->date_updated = $document->getDateUpdated()->format('Ymdhis');
     }
     if ($document->getUpdatedBy()) {
       $dao->updated_by = $document->getUpdatedBy();
@@ -546,7 +554,7 @@ class CRM_Documents_Entity_DocumentRepository {
     $vdao->version = $version->getVersion();
     $vdao->document_id = $document->getId();
     if ($version->getDateUpdated()) {
-      $vdao->date_updated = $version->getDateUpdated()->format('Ymd');
+      $vdao->date_updated = $version->getDateUpdated()->format('Ymdhis');
     }
     if ($version->getUpdatedBy()) {
       $vdao->updated_by = $version->getUpdatedBy();

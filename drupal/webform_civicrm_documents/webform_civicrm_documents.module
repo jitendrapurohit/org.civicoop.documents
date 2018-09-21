@@ -60,6 +60,47 @@ function webform_civicrm_documents_form_webform_component_edit_form_alter(&$form
       ),
     ),
   );
+
+  $form['#submit'][] = 'webform_civicrm_documents_submit';
+}
+
+/**
+ * Submit handler for altering file attachment.
+ */
+function webform_civicrm_documents_submit($form, &$form_state) {
+  $component = $form_state['build_info']['args'][1];
+
+  $webformCids = CRM_Utils_Array::collect('cid', $form['#node']->webform['components']);
+  $formKeys = CRM_Utils_Array::collect('form_key', $form['#node']->webform['components']);
+  $weights = CRM_Utils_Array::collect('weight', $form['#node']->webform['components']);
+
+  $subjectFormKey = "{$component['form_key']}_file_subject";
+  $subjectLabel = "File Subject ({$component['name']})";
+  $comp = array(
+    'label' => $subjectLabel,
+    'description' => t('File Subject.'),
+    'nid' => $component['nid'],
+    'cid' => max($webformCids) + 1,
+    'type' => 'textfield',
+    'form_key' => $subjectFormKey,
+    'pid' => $component['pid'],
+    'name' => $subjectLabel,
+    'weight' => max($weights) + 1,
+  );
+  if (!empty($form_state['values']['webform_civicrm_documents']['enabled'])) {
+    if (!in_array($subjectFormKey, $formKeys)) {
+      webform_component_insert($comp);
+    }
+  }
+  elseif (in_array($subjectFormKey, $formKeys)) {
+    foreach ($form['#node']->webform['components'] as $key => $values) {
+      if ($values['form_key'] == $subjectFormKey) {
+        $comp['cid'] = $values['cid'];
+        $comp['weight'] = $values['weight'];
+      }
+    }
+    webform_component_delete($form['#node'], $comp);
+  }
 }
 
 function webform_civicrm_documents_webform_component_presave(&$component) {

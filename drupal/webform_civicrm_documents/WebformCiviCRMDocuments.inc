@@ -149,17 +149,29 @@ class WebformCiviCRMDocuments {
     if (count($submission) == 1) {
       //single file
       $fid = reset($submission);
+      $subject = $this->getSubjectFromWebform();
       $this->saveFileAsDocument($fid, $subject, $component);
     } elseif (count($submission) > 1) {
       //multiple files
       $i = 1;
-      foreach ($submission as $fid) {
+      foreach ($submission as $k => $fid) {
+        $subject = $this->getSubjectFromWebform($k, $component);
         $this->saveFileAsDocument($fid, $subject.' '.$i, $component);
         $i ++;
       }
     }
   }
   
+  public function getSubjectFromWebform($nodeKey = 0) {
+    $descKey = NULL;
+    foreach ($this->node->webform['components'] as $key => $value) {
+      if ($value['form_key'] == 'file_subject') {
+        $descKey = $key;
+      }
+    }
+    return $this->submission->data[$descKey][$nodeKey];
+  }
+
   protected function saveFileAsDocument($fid, $subject, $component) {
     $documentsRepo = CRM_Documents_Entity_DocumentRepository::singleton();
     

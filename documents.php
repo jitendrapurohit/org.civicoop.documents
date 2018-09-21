@@ -199,6 +199,133 @@ function documents_civicrm_pre( $op, $objectName, $id, &$params ) {
   }
 }
 
+/**
+ * @param type $op
+ * @param type $objectName
+ * @param type $objectId
+ * @param type $objectRef
+ */
+function documents_civicrm_post($op, $objectName, $objectId, &$objectRef) {
+  if ($objectName == 'CaseActivity' && $op != 'delete') {
+    $objectId = $objectRef->activity_id;
+    $objectName = 'Activity';
+  }
+  $fileIdsAssigned = array();
+  if ($objectName == 'Activity' && $op != 'delete') {
+    $activity = CRM_Core_DAO::executeQuery(
+      "SELECT *
+      FROM civicrm_entity_file
+      WHERE entity_table = 'civicrm_activity'
+        AND entity_id = {$objectId}");
+
+    while ($activity->fetch()) {
+      if (in_array($activity->file_id, $fileIdsAssigned)) {
+        continue;
+      }
+      $fileIdsAssigned[] = $activity->file_id;
+      $subject = CRM_Core_DAO::getFieldValue('CRM_Core_BAO_File', $activity->file_id, 'description');
+      if (empty($subject)) {
+        $subject = CRM_Core_DAO::getFieldValue('CRM_Core_BAO_File', $activity->file_id, 'uri');
+        $subject = preg_replace('/\\.[^.\\s]{3,4}$/', '', $subject);
+      }
+      $entityFile = CRM_Core_BAO_File::getEntityFile('civicrm_activity', $activity->entity_id);
+      if (!empty($entityFile[$activity->file_id])) {
+        $subject = $entityFile[$activity->file_id]['description'];
+        if (empty($subject)) {
+          $subject = preg_replace('/\\.[^.\\s]{3,4}$/', '', $entityFile[$activity->file_id]['cleanName']);
+        }
+      }
+      $caseActivity = civicrm_api3('Activity', 'get', array(
+        'sequential' => 1,
+        'return' => array("case_id"),
+        'id' => $activity->entity_id,
+      ));
+      if (!empty($caseActivity['values']) && !empty($caseActivity['values'][0]['case_id'])) {
+        $caseId = $caseActivity['values'][0]['case_id'][0];
+        //Check if doc exists.
+        $document = CRM_Core_DAO::executeQuery("SELECT id FROM civicrm_document WHERE subject = '{$subject}'");
+        $duplicate = $contactIds = array();
+        while ($document->fetch()) {
+          $duplicate[] = CRM_Core_DAO::singleValueQuery("SELECT COUNT(*) FROM civicrm_document_case WHERE case_id = {$caseId} AND document_id = {$document->id}");
+          $contactIds[] = CRM_Core_DAO::singleValueQuery("SELECT contact_id FROM civicrm_document_contact WHERE document_id = {$document->id}");
+        }
+        if (in_array(1, $duplicate)) {
+          continue;
+        }
+        $documentsRepo = CRM_Documents_Entity_DocumentRepository::singleton();
+        $doc = new CRM_Documents_Entity_Document();
+
+        $contactId = civicrm_api3('CaseContact', 'getvalue', array(
+          'return' => "contact_id",
+          'case_id' => $caseId,
+        ));
+
+        $doc->addContactId($contactId);
+        $doc->addCaseId($caseId);
+        $doc->setSubject($subject);
+        $version = $doc->addNewVersion();
+        $version->setDescription($subject);
+
+        $documentsRepo->persist($doc);
+
+        $entityFile = new CRM_Core_DAO_EntityFile();
+        $entityFile->entity_table = 'civicrm_document_version';
+        $entityFile->entity_id = $version->getId();
+        $entityFile->file_id = $activity->file_id;
+        $entityFile->save();
+      }
+    }
+    $isDone = TRUE;
+  }
+}
+
+/**
+ * @param type $formName
+ * @param type $form
+ */
+function documents_civicrm_postProcess($formName, &$form) {
+  if (in_array($formName, array('CRM_Case_Form_Activity', 'CRM_Case_Form_Case')) && $form->getAction() == CRM_Core_Action::ADD) {
+    if (!empty($form->_submitFiles)) {
+      foreach ($form->_submitFiles as $key => $files) {
+        if (!empty($files['name'])) {
+          $documentsRepo = CRM_Documents_Entity_DocumentRepository::singleton();
+          $doc = new CRM_Documents_Entity_Document();
+          if (!empty($form->_caseId)) {
+            $caseId = is_array($form->_caseId) ? $form->_caseId[0] : $form->_caseId;
+            $doc->addCaseId($caseId);
+            $contactId = civicrm_api3('CaseContact', 'getvalue', array(
+              'return' => "contact_id",
+              'case_id' => $caseId,
+            ));
+            $doc->addContactId($contactId);
+          }
+          list($dontCare, $fileNum) = explode('_', $key);
+          $subject = CRM_Utils_Array::value("attachDesc_{$fileNum}", $form->_submitValues);
+          if (empty($subject)) {
+            $subject = preg_replace('/\\.[^.\\s]{3,4}$/', '', $files['name']);
+          }
+          $doc->setSubject($subject);
+          $version = $doc->addNewVersion();
+          $version->setDescription($subject);
+          $values = $form->controller->exportValues();
+
+          $params = array(); //used for attachments
+          // add attachments as needed
+          CRM_Core_BAO_File::formatAttachment($values,
+            $params,
+            'civicrm_document_version',
+            $doc->getCurrentVersion()->getId()
+          );
+
+          //save document
+          $documentsRepo->persist($doc);
+          CRM_Core_BAO_File::processAttachment($params, 'civicrm_document_version', $doc->getCurrentVersion()->getId());
+        }
+      }
+    }
+  }
+}
+
 function documents_civicrm_postSave_civicrm_case($dao) {
   $repo = CRM_Documents_Entity_DocumentRepository::singleton();
   if (!$dao->id) {
